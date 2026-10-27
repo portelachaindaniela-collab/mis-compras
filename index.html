@@ -70,6 +70,22 @@ dialog h2{margin:0 0 4px}
 .fila-asis{display:flex;gap:8px;align-items:flex-start}
 .fila-asis>img{width:40px;height:52px;object-fit:cover;object-position:top;flex:none;margin-top:10px}
 .fila-asis .msj{margin:10px 0}
+.aviso{width:min(420px,calc(100% - 32px))}
+.aviso form{padding:20px 18px 14px}
+.aviso p{margin:0 0 12px;font-size:20px}
+.aviso .si{background:var(--acento);border-color:var(--acento);color:#fff;font-weight:700}
+.aviso .si.peligro{background:var(--rojo);border-color:var(--rojo)}
+.barra-charlas{display:flex;gap:8px;margin:0 0 8px}
+.barra-charlas button{flex:1;min-height:44px;font-size:16px}
+.charla h3{font-size:19px;margin:0 0 2px;word-break:break-word}
+.charla.actual{border:2px solid var(--acento)}
+@keyframes golpe{0%,100%{transform:none}12%{transform:translate(-7px,2px)}24%{transform:translate(6px,-2px)}36%{transform:none}52%{transform:translate(-7px,2px)}64%{transform:translate(6px,-2px)}76%{transform:none}}
+body.golpe main{animation:golpe .55s ease-out}
+.toc{position:fixed;left:16px;right:16px;max-width:420px;margin:0 auto;display:flex;align-items:center;gap:10px;
+  background:var(--card);border:2px solid var(--acento);border-radius:18px;padding:8px 14px;box-shadow:0 6px 24px rgba(0,0,0,.18);
+  font-size:20px;font-weight:700;z-index:5;animation:aparece .3s ease-out}
+.toc img{width:44px;height:56px;object-fit:cover;object-position:top}
+@keyframes aparece{from{transform:translateY(16px) scale(.9)}to{transform:none}}
 body.en-chat{padding-bottom:calc(170px + env(safe-area-inset-bottom))}
 .msj{max-width:88%;padding:10px 14px;border-radius:16px;margin:10px 0;white-space:pre-wrap;word-wrap:break-word}
 .msj.yo{margin-left:auto;background:var(--acento);color:#fff;border-bottom-right-radius:4px}
@@ -105,6 +121,11 @@ body.en-chat{padding-bottom:calc(170px + env(safe-area-inset-bottom))}
 </nav>
 
 <dialog id="modal"><form method="dialog" id="formModal"></form></dialog>
+<dialog id="aviso" class="aviso"><form method="dialog">
+  <p id="avisoTexto"></p>
+  <input id="avisoCampo" hidden>
+  <div class="fila fin"><button value="no" id="avisoNo">Cancelar</button><button value="si" id="avisoSi" class="si">Sí</button></div>
+</form></dialog>
 <input type="file" id="archivo" accept="application/json" hidden>
 
 <script>
@@ -124,7 +145,7 @@ function cargar() {
   return { notas: [], productos: [], locales: [] };
 }
 function guardar() {
-  try { localStorage.setItem(CLAVE, JSON.stringify(datos)); } catch { alert('No se pudo guardar en este teléfono.'); }
+  try { localStorage.setItem(CLAVE, JSON.stringify(datos)); } catch { avisar('No se pudo guardar en este teléfono.'); }
 }
 function leerTab() {
   try { const t = localStorage.getItem(CLAVE + '-tab'); if (TITULOS[t]) return t; } catch {}
@@ -304,8 +325,21 @@ function editarLocal(lid) {
 }
 
 /* ---------- Asistente ---------- */
-const CLAVE_CHAT = CLAVE + '-chat', CLAVE_CODIGO = CLAVE + '-codigo';
-let chat = (() => { try { return JSON.parse(localStorage.getItem(CLAVE_CHAT)) || []; } catch { return []; } })();
+const CLAVE_CHARLAS = CLAVE + '-charlas', CLAVE_CODIGO = CLAVE + '-codigo';
+// Cada charla guarda sus mensajes; `chat` apunta a los mensajes de la charla abierta.
+let charlas = (() => {
+  try {
+    const c = JSON.parse(localStorage.getItem(CLAVE_CHARLAS));
+    if (Array.isArray(c)) return c;
+    const vieja = JSON.parse(localStorage.getItem(CLAVE + '-chat'));
+    if (Array.isArray(vieja) && vieja.length) return [{ id: id(), titulo: '', fecha: Date.now(), mensajes: vieja }];
+  } catch {}
+  return [];
+})();
+if (!charlas.length) charlas.push({ id: id(), titulo: '', fecha: Date.now(), mensajes: [] });
+let actual = charlas[0].id;
+let chat = charlas[0].mensajes;
+let verCharlas = false;
 let esperando = false;
 function codigo() { try { return localStorage.getItem(CLAVE_CODIGO) || ''; } catch { return ''; } }
 (() => {
@@ -314,7 +348,49 @@ function codigo() { try { return localStorage.getItem(CLAVE_CODIGO) || ''; } cat
   try { localStorage.setItem(CLAVE_CODIGO, c); } catch {}
   history.replaceState(null, '', location.pathname + location.search);
 })();
-function guardarChat() { chat = chat.slice(-60); try { localStorage.setItem(CLAVE_CHAT, JSON.stringify(chat)); } catch {} }
+const tituloDe = c => c.titulo || (c.mensajes.find(m => m.rol === 'user')?.texto || 'Charla nueva').slice(0, 60);
+function guardarChat() {
+  for (const c of charlas) if (c.mensajes.length > 60) c.mensajes.splice(0, c.mensajes.length - 60);
+  charlas = charlas.filter(c => c.mensajes.length || c.id === actual);
+  try { localStorage.setItem(CLAVE_CHARLAS, JSON.stringify(charlas)); localStorage.removeItem(CLAVE + '-chat'); } catch {}
+}
+function abrirCharla(cid) {
+  const c = charlas.find(x => x.id === cid);
+  if (!c) return;
+  actual = c.id; chat = c.mensajes; verCharlas = false;
+  guardarChat(); dibujar(); scrollTo(0, document.body.scrollHeight);
+}
+function nuevaCharla() {
+  const vacia = charlas.find(c => !c.mensajes.length);
+  if (vacia) return abrirCharla(vacia.id);
+  const c = { id: id(), titulo: '', fecha: Date.now(), mensajes: [] };
+  charlas.unshift(c); abrirCharla(c.id);
+}
+async function renombrarCharla(cid) {
+  const c = charlas.find(x => x.id === cid);
+  const nombre = await pedirTexto('¿Qué nombre le ponés a esta charla?', tituloDe(c));
+  if (nombre == null || !nombre.trim()) return;
+  c.titulo = nombre.trim().slice(0, 60); guardarChat(); dibujar();
+}
+async function borrarCharla(cid) {
+  if (!await preguntar('¿Borrar esta charla? No se puede recuperar.', 'Borrar', true)) return;
+  charlas = charlas.filter(c => c.id !== cid);
+  if (!charlas.length) charlas.push({ id: id(), titulo: '', fecha: Date.now(), mensajes: [] });
+  if (cid === actual) { actual = charlas[0].id; chat = charlas[0].mensajes; }
+  guardarChat(); dibujar();
+}
+function vistaCharlas() {
+  const lista = [...charlas].filter(c => c.mensajes.length).sort((a, b) => b.fecha - a.fecha);
+  return `<div class="barra-charlas"><button onclick="verCharlas=false;dibujar()">← Volver</button><button onclick="nuevaCharla()">+ Charla nueva</button></div>
+    ${lista.length ? lista.map(c => `<div class="tarjeta charla ${c.id === actual ? 'actual' : ''}">
+      <h3>${esc(tituloDe(c))}</h3>
+      <p>${fecha(c.fecha)} · ${(n => n === 1 ? '1 pregunta' : n + ' preguntas')(c.mensajes.filter(m => m.rol === 'user').length)}</p>
+      <div class="fila fin">
+        <button class="chico" onclick="abrirCharla('${c.id}')">Abrir</button>
+        <button class="chico" onclick="renombrarCharla('${c.id}')">Cambiar nombre</button>
+        <button class="chico borrar" onclick="borrarCharla('${c.id}')">Borrar</button></div></div>`).join('')
+      : '<p class="vacio">Todavía no tenés charlas guardadas.</p>'}`;
+}
 
 const SUGERENCIAS = ['¿Cuánto sale la docena de medias por mayor?', '¿A cuánto conviene vender lo que anoté?','¿Qué le pregunto al mayorista antes de comprar?', '¿Qué cosas se venden bien para empezar?'];
 const ESTADOS = ['Pensando…', '🔎 Buscando en internet…', '🔎 Leyendo las páginas de los vendedores…', '🧮 Comparando precios y haciendo las cuentas…', 'Ya casi…'];
@@ -322,6 +398,10 @@ const NOMBRE_ACCION ={ agregar_nota: 'Guardar nota', agregar_producto: 'Anotar p
 
 function vistaAsistente() {
   if (!codigo()) return `<p class="vacio">Para usar el asistente, abrí una vez el link especial que te pasó Daniela.</p>`;
+  if (verCharlas) return vistaCharlas();
+  const cuantas = charlas.filter(c => c.mensajes.length).length;
+  const barra = `<div class="barra-charlas"><button onclick="verCharlas=true;dibujar();scrollTo(0,0)">📋 Mis charlas${cuantas ? ` (${cuantas})` : ''}</button>
+    <button onclick="nuevaCharla()">+ Charla nueva</button></div>`;
   const lista = chat.map((m, i) => `${m.rol === 'user' ? '' : '<div class="fila-asis"><img src="frida.svg" alt="">'}<div class="msj ${m.rol === 'user' ? 'yo' : 'asis'}">${esc(m.texto).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')}${
     (m.busquedas || []).map(b => `<div class="fuentes"><p>🔎 Busqué: “${esc(b.consulta)}”</p>
       ${b.fuentes.map(u => `<a href="${esc(u)}" target="_blank" rel="noopener">🔗 ${esc(sitio(u))}</a>`).join('')}
@@ -329,15 +409,15 @@ function vistaAsistente() {
     (m.acciones || []).map((a, j) => a.hecha ? `<div class="propuesta"><p>✓ ${a.hecha}</p></div>` : `<div class="propuesta"><p>${esc(describir(a))}</p>
       <button class="chico" onclick="aplicar(${i},${j})">✓ ${NOMBRE_ACCION[a.accion] || 'Guardar'}</button>
       <button class="chico" onclick="descartar(${i},${j})">No</button></div>`).join('')}</div>${m.rol === 'user' ? '' : '</div>'}`).join('');
-  return `${chat.length ? '' : `<div class="bienvenida"><img src="frida.svg" alt="Frida"><p><b>¡Hola! Soy Frida 🌸</b></p></div>
+  return `${barra}${chat.length ? '' : `<div class="bienvenida"><img src="frida.svg" alt="Frida"><p><b>¡Hola! Soy Frida 🌸</b></p></div>
     <p class="ayuda">Preguntame lo que quieras sobre tus compras: busco precios en internet, te hago las cuentas, te digo qué comprar y dónde. También te anoto cosas.</p>
     <div class="sugerencias">${SUGERENCIAS.map(s => `<button onclick="enviar(this.textContent)">${s}</button>`).join('')}</div>`}
     ${lista}
     ${esperando ? `<div class="fila-asis"><img src="frida.svg" alt=""><div class="msj asis pensando" id="pensando">${ESTADOS[0]}</div></div>` : ''}
-    ${chat.length ? '<div class="pie"><button onclick="if(confirm(\'¿Borrar la charla?\')){chat=[];guardarChat();dibujar()}">Empezar charla nueva</button></div>' : ''}`;
+    ${chat.length ? `<div class="pie"><button onclick="renombrarCharla(actual)">Cambiar nombre</button><button onclick="borrarCharla(actual)">Borrar esta charla</button></div>` : ''}`;
 }
 function conectarChat() {
-  if (!codigo()) return;
+  if (!codigo() || verCharlas) return;
   const caja = document.createElement('div');
   caja.className = 'escribir'; caja.id = 'escribir';
   const voz = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -380,8 +460,9 @@ function contexto() {
 async function enviar(txt) {
   txt = txt.trim();
   if (!txt || esperando) return;
-  const historial = chat.slice(-16).map(m => ({ rol: m.rol, texto: m.texto }));
-  chat.push({ rol: 'user', texto: txt }); guardarChat();
+  const charla = charlas.find(c => c.id === actual), msjs = charla.mensajes;
+  const historial = msjs.slice(-16).map(m => ({ rol: m.rol, texto: m.texto }));
+  msjs.push({ rol: 'user', texto: txt }); charla.fecha = Date.now(); guardarChat();
   esperando = true; dibujar(); scrollTo(0, document.body.scrollHeight);
   const t0 = Date.now();
   const reloj = setInterval(() => {
@@ -401,8 +482,40 @@ async function enviar(txt) {
   } catch { resp = { texto: 'No hay internet o no me pude conectar. Probá de nuevo en un rato.' }; }
   clearInterval(reloj);
   esperando = false;
-  chat.push({ rol: 'assistant', ...resp }); guardarChat();
-  if (tab === 'asistente') { dibujar(); document.querySelectorAll('.msj.asis')[chat.filter(m => m.rol === 'assistant').length - 1]?.scrollIntoView({ block: 'start' }); }
+  msjs.push({ rol: 'assistant', ...resp }); charla.fecha = Date.now(); guardarChat();
+  if (tab === 'asistente' && !verCharlas && charla.id === actual) {
+    programarToc(); dibujar(); document.querySelectorAll('.msj.asis')[chat.filter(m => m.rol === 'assistant').length - 1]?.scrollIntoView({ block: 'start' }); }
+}
+
+// Toc toc: si después de una respuesta pasan 10 segundos sin que toque ni escriba nada, Frida golpea la pantalla una vez.
+let timerToc = null;
+function programarToc() {
+  clearTimeout(timerToc);
+  const cancelar = () => { clearTimeout(timerToc); ['pointerdown', 'keydown'].forEach(ev => removeEventListener(ev, cancelar, true)); };
+  ['pointerdown', 'keydown'].forEach(ev => addEventListener(ev, cancelar, true));
+  timerToc = setTimeout(() => { cancelar(); if (tab === 'asistente' && !document.hidden) tocToc(); }, 10000);
+}
+function tocToc() {
+  document.body.classList.remove('golpe'); void document.body.offsetWidth; document.body.classList.add('golpe');
+  try { navigator.vibrate?.([45, 110, 45]); } catch {}
+  try {
+    const ac = new (window.AudioContext || window.webkitAudioContext)();
+    [0, 0.17].forEach(t => {
+      const o = ac.createOscillator(), g = ac.createGain();
+      o.type = 'sine'; o.frequency.setValueAtTime(190, ac.currentTime + t); o.frequency.exponentialRampToValueAtTime(70, ac.currentTime + t + 0.09);
+      g.gain.setValueAtTime(0.0001, ac.currentTime + t); g.gain.exponentialRampToValueAtTime(0.8, ac.currentTime + t + 0.005); g.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + t + 0.12);
+      o.connect(g).connect(ac.destination); o.start(ac.currentTime + t); o.stop(ac.currentTime + t + 0.13);
+    });
+    setTimeout(() => ac.close(), 600);
+  } catch {}
+  document.getElementById('toc')?.remove();
+  const b = document.createElement('div');
+  b.id = 'toc'; b.className = 'toc';
+  b.innerHTML = '<img src="frida.svg" alt=""><span>¡Toc toc! 👋 ¿Seguís ahí?</span>';
+  b.style.bottom = ((document.getElementById('escribir')?.offsetHeight || 0) + document.getElementById('menu').offsetHeight + 10) + 'px';
+  b.onclick = () => { b.remove(); document.getElementById('pregunta')?.focus(); };
+  document.body.appendChild(b);
+  setTimeout(() => b.remove(), 5000);
 }
 
 const sitio = u => { try { const x = new URL(u); return x.hostname.replace(/^www\./, '') + (x.pathname.length > 1 ? x.pathname.slice(0, 40) : ''); } catch { return u; } };
@@ -429,7 +542,7 @@ function aplicar(i, j) {
     hecho = 'Producto anotado en "Lo que busco"';
   } else if (a.accion === 'marcar_comprado') {
     const p = buscarPorNombre(datos.productos, a.nombre);
-    if (!p) { alert('No encontré ese producto en tu lista.'); return; }
+    if (!p) { avisar('No encontré ese producto en tu lista.'); return; }
     p.comprado = true; hecho = `"${p.nombre}" marcado como comprado`;
   }
   a.hecha = hecho; guardar(); guardarChat(); dibujar();
@@ -437,6 +550,24 @@ function aplicar(i, j) {
 function descartar(i, j) { chat[i].acciones.splice(j, 1); guardarChat(); dibujar(); }
 
 /* ---------- Comunes ---------- */
+// Cartelitos propios: los alert/confirm del navegador muestran la dirección del sitio arriba.
+function cartel(texto, { si = 'Aceptar', no = '', peligro = false, campo = null } = {}) {
+  const d = document.getElementById('aviso'), c = document.getElementById('avisoCampo'), bSi = document.getElementById('avisoSi'), bNo = document.getElementById('avisoNo');
+  document.getElementById('avisoTexto').textContent = texto;
+  bSi.textContent = si; bSi.classList.toggle('peligro', peligro);
+  bNo.textContent = no; bNo.hidden = !no;
+  c.hidden = campo == null; c.value = campo ?? '';
+  c.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); d.close('si'); } };
+  d.returnValue = '';
+  d.showModal();
+  if (campo != null) { c.focus(); c.select(); }
+  return new Promise(ok => d.addEventListener('close', () => ok(d.returnValue === 'si'), { once: true }));
+}
+const avisar = texto => cartel(texto);
+const preguntar = (texto, si = 'Sí', peligro = false) => cartel(texto, { si, no: 'Cancelar', peligro });
+async function pedirTexto(texto, valor) {
+  return await cartel(texto, { si: 'Guardar', no: 'Cancelar', campo: valor }) ? document.getElementById('avisoCampo').value : null;
+}
 let alGuardar = null;
 function abrir(html, cb) {
   const m = document.getElementById('modal'), f = document.getElementById('formModal');
@@ -449,8 +580,8 @@ document.getElementById('formModal').onsubmit = e => {
   if (alGuardar) alGuardar(valores);
   alGuardar = null; guardar(); dibujar();
 };
-function borrar(lista, x) {
-  if (!confirm('¿Seguro que lo querés borrar?')) return;
+async function borrar(lista, x) {
+  if (!await preguntar('¿Seguro que lo querés borrar?', 'Borrar', true)) return;
   datos[lista] = datos[lista].filter(i => i.id !== x);
   if (lista === 'locales') datos.productos.forEach(p => { if (p.local === x) p.local = ''; });
   guardar(); dibujar();
@@ -471,10 +602,10 @@ document.getElementById('archivo').onchange = async e => {
   if (!file) return;
   try {
     const d = JSON.parse(await file.text());
-    if (!confirm('Esto reemplaza lo que tenés ahora por la copia. ¿Seguir?')) return;
+    if (!await preguntar('Esto reemplaza lo que tenés ahora por la copia. ¿Seguir?', 'Seguir')) return;
     datos = { notas: d.notas || [], productos: d.productos || [], locales: d.locales || [] };
     guardar(); dibujar();
-  } catch { alert('Ese archivo no es una copia válida.'); }
+  } catch { avisar('Ese archivo no es una copia válida.'); }
 };
 
 document.querySelectorAll('#menu button').forEach(b => b.onclick = () => cambiarTab(b.dataset.tab));

@@ -1,4 +1,4 @@
-const CACHE = 'mis-compras-v4';
+const CACHE = 'mis-compras-v5';
 const BASE = ['./', './index.html', './manifest.webmanifest', './icono-192.png', './icono-512.png', './icono.svg', './frida.svg'];
 
 self.addEventListener('install', e => {
