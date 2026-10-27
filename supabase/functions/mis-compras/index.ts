@@ -10,9 +10,14 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 const env = Deno.env.toObject();
 const db = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
+const OR_URL = "https://openrouter.ai/api/v1/chat/completions";
+// OpenRouter es pago (crédito prepago cargado por Daniela): se usa para buscar en internet y como respaldo del chat
+// cuando se agota el cupo gratis de Groq.
+const OR_MODELO = env.COMPRAS_OR_MODELO || "openai/gpt-oss-120b";
+const orHeaders = () => ({ Authorization: `Bearer ${env.OPENROUTER_API_KEY}`, "Content-Type": "application/json", "HTTP-Referer": "https://portelachaindaniela-collab.github.io/mis-compras/", "X-Title": "Mis Compras" });
 // Groq gratis tiene un cupo diario de tokens POR MODELO, compartido con las otras apps de SB: si uno se agota (429) se
 // pasa al siguiente. Para buscar se arranca por el grande, que es el más rápido con browser_search.
-const MODELOS = [env.COMPRAS_MODELO || "openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"];
+const MODELOS = [env.COMPRAS_MODELO || "openai/gpt-oss-120b", "openai/gpt-oss-20b", "openrouter", "qwen/qwen3.8-27b"];
 const MODELOS_BUSQUEDA = ["openai/gpt-oss-120b", "openai/gpt-oss-20b"];
 const GEMINI_MODELO = env.COMPRAS_GEMINI || "gemini-3.8-flash";
 const LIMITE_DIARIO = 200;
@@ -76,6 +81,26 @@ async function buscarEnInternet(consulta: string) {
     `Hasta 6 resultados; para cada uno: nombre del local o vendedor, precio en pesos argentinos, presentación (unidad, docena, pack, mínimo de compra), ` +
     `zona o dirección si aparece, y la URL exacta. Preferí mayoristas, Mercado Libre y tiendas argentinas. ` +
     `No inventes nada: si no encontrás precios, decilo. Búsqueda: ${consulta}`;
+  if (env.OPENROUTER_API_KEY) {
+    try {
+      const r = await fetch(OR_URL, {
+        method: "POST",
+        headers: orHeaders(),
+        body: JSON.stringify({ model: OR_MODELO, messages: [{ role: "user", content: pedido }], temperature: 0.2, max_tokens: 1500, plugins: [{ id: "web", max_results: 5 }], reasoning: { effort: "low" } }),
+        signal: AbortSignal.timeout(25000),
+      });
+      const d = await r.json().catch(() => null);
+      const m = d?.choices?.[0]?.message ?? {};
+      const contenido = String(m.content ?? "");
+      if (r.ok && contenido.trim()) {
+        const citas = (m.annotations ?? []).map((a: any) => a?.url_citation?.url);
+        const urls = [...contenido.matchAll(/https?:\/\/[^\s)\]>"'*,|]+/g)].map(x => x[0].replace(/[.;:]+$/, ""));
+        const fuentes = [...new Set([...citas, ...urls].filter((u: unknown) => typeof u === "string" && u.startsWith("http")))].slice(0, 6) as string[];
+        return { texto: contenido, fuentes };
+      }
+      console.warn("mis-compras búsqueda openrouter", r.status, JSON.stringify(d).slice(0, 300));
+    } catch (e) { console.warn("mis-compras búsqueda openrouter", String(e)); }
+  }
   for (const model of MODELOS_BUSQUEDA) {
     try {
       const r = await fetch(GROQ_URL, {
@@ -122,7 +147,7 @@ async function preguntar(codigoHash: string, body: any) {
   const { data: uso } = await db.from("compras_uso").select("cantidad").eq("codigo_hash", codigoHash).eq("dia", dia).maybeSingle();
   if ((uso?.cantidad ?? 0) >= LIMITE_DIARIO) return { texto: "Por hoy ya charlamos muchísimo. ¡Mañana sigo ayudándote! 😊", acciones: [] };
   await db.from("compras_uso").upsert({ codigo_hash: codigoHash, dia, cantidad: (uso?.cantidad ?? 0) + 1 });
-  if (!env.GROQ_API_KEY) return { error: "ia" };
+  if (!env.GROQ_API_KEY && !env.OPENROUTER_API_KEY) return { error: "ia" };
 
   const historial = (Array.isArray(body.historial) ? body.historial : []).slice(-16)
     .filter((m: any) => (m?.rol === "user" || m?.rol === "assistant") && typeof m.texto === "string" && m.texto)
@@ -136,10 +161,10 @@ async function preguntar(codigoHash: string, body: any) {
     ...historial,
     { role: "user", content: pregunta },
   ];
-  const pedir = (model: string, msgs: unknown[], eleccion = "auto") => fetch(GROQ_URL, {
+  const pedir = (model: string, msgs: unknown[], eleccion = "auto") => fetch(model === "openrouter" ? OR_URL : GROQ_URL, {
     method: "POST",
-    headers: { Authorization: `Bearer ${env.GROQ_API_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model, messages: msgs, temperature: 0.4, max_tokens: 2000, tools: HERRAMIENTAS, tool_choice: eleccion }),
+    headers: model === "openrouter" ? orHeaders() : { Authorization: `Bearer ${env.GROQ_API_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ model: model === "openrouter" ? OR_MODELO : model, messages: msgs, temperature: 0.4, max_tokens: 2000, tools: HERRAMIENTAS, tool_choice: eleccion }),
     signal: AbortSignal.timeout(45000),
   });
   let cual = 0;
@@ -147,6 +172,7 @@ async function preguntar(codigoHash: string, body: any) {
   // Pide al primer modelo que ande, empezando por el último que funcionó.
   const pedirAlguno = async (msgs: unknown[], eleccion = "auto") => {
     for (; cual < MODELOS.length; cual++) {
+      if (MODELOS[cual] === "openrouter" && !env.OPENROUTER_API_KEY) continue;
       try {
         const r = await pedir(MODELOS[cual], msgs, eleccion);
         const d = await r.json().catch(() => null);
