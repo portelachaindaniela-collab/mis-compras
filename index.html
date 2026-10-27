@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Mis Compras</title>
+<meta name="description" content="Anotar qué busco para vender, calcular costos y guardar locales">
+<meta name="theme-color" content="#f7f3ec">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icono.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icono-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Mis Compras">
+<style>
+:root{
+  --bg:#f7f3ec; --card:#fff; --inset:#efe8dc; --ink:#26221d; --muted:#6f665b; --line:#e3d9ca;
+  --acento:#1f7a5c; --acento-soft:#dcefe6; --rojo:#b8402f; --ambar:#a8650a;
+  color-scheme:light;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:19px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  padding-bottom:calc(88px + env(safe-area-inset-bottom))}
+header{padding:20px 16px 8px;max-width:640px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:12px}
+h1{font-size:28px;margin:0}
+main{max-width:640px;margin:0 auto;padding:0 16px}
+.vacio{color:var(--muted);text-align:center;padding:32px 8px}
+.tarjeta{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px 16px;margin:12px 0}
+.tarjeta h3{margin:0 0 4px;font-size:21px}
+.tarjeta p{margin:4px 0;color:var(--muted)}
+.fila{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.fila.fin{justify-content:flex-end;margin-top:10px}
+.cifras{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-top:10px}
+.cifra{background:var(--inset);border-radius:12px;padding:8px 12px}
+.cifra small{display:block;color:var(--muted);font-size:15px}
+.cifra b{font-size:21px}
+.verde{color:var(--acento)} .rojo{color:var(--rojo)}
+.chip{display:inline-block;font-size:15px;padding:2px 10px;border-radius:99px;background:var(--inset);color:var(--muted)}
+.chip.ok{background:var(--acento-soft);color:var(--acento)}
+button{font:inherit;cursor:pointer;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--ink);padding:10px 16px;min-height:48px}
+button.grande{width:100%;background:var(--acento);border-color:var(--acento);color:#fff;font-weight:700;font-size:20px;margin:8px 0}
+button.chico{min-height:40px;padding:6px 12px;font-size:16px}
+button.borrar{color:var(--rojo)}
+label{display:block;margin:12px 0 4px;font-weight:600}
+input,textarea,select{font:inherit;width:100%;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--ink)}
+textarea{min-height:110px;resize:vertical}
+input:focus,textarea:focus,select:focus{outline:3px solid var(--acento-soft);border-color:var(--acento)}
+.dos{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.buscar{margin:4px 0 4px}
+nav{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--line);
+  display:grid;grid-template-columns:repeat(4,1fr);padding-bottom:env(safe-area-inset-bottom)}
+nav button{border:0;border-radius:0;background:none;display:flex;flex-direction:column;align-items:center;gap:2px;padding:8px 2px;min-height:72px;font-size:15px;color:var(--muted)}
+nav button span{font-size:26px;line-height:1}
+nav button.activo{color:var(--acento);font-weight:700;background:var(--acento-soft)}
+dialog{border:0;border-radius:20px;padding:0;width:min(600px,calc(100% - 24px));max-height:calc(100% - 24px);background:var(--bg);color:var(--ink)}
+dialog::backdrop{background:rgba(0,0,0,.4)}
+dialog form{padding:18px 16px}
+dialog h2{margin:0 0 4px}
+.resultado{background:var(--card);border:2px solid var(--acento);border-radius:16px;padding:14px 16px;margin:16px 0}
+.resultado p{margin:6px 0}
+.resultado b{font-size:22px}
+.ayuda{color:var(--muted);font-size:16px;margin:4px 0}
+.atajos{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+.pie{color:var(--muted);font-size:15px;text-align:center;margin:28px 0 8px}
+.pie button{font-size:15px;min-height:40px;margin:4px}
+</style>
+</head>
+<body>
+<header><h1 id="titulo">Notas</h1></header>
+<main id="vista"></main>
+
+<nav id="menu">
+  <button data-tab="notas"><span>📝</span>Notas</button>
+  <button data-tab="productos"><span>📦</span>Lo que busco</button>
+  <button data-tab="calcular"><span>🧮</span>Calcular</button>
+  <button data-tab="locales"><span>🏪</span>Locales</button>
+</nav>
+
+<dialog id="modal"><form method="dialog" id="formModal"></form></dialog>
+<input type="file" id="archivo" accept="application/json" hidden>
+
+<script>
+const CLAVE = 'mis-compras-v1';
+const TITULOS = { notas: 'Notas', productos: 'Lo que busco', calcular: 'Calcular', locales: 'Locales' };
+let datos = cargar();
+let tab = leerTab();
+let filtro = '';
+const calc = { bulto: '', unidades: '', venta: '' };
+
+function cargar() {
+  try {
+    const d = JSON.parse(localStorage.getItem(CLAVE));
+    if (d) return { notas: d.notas || [], productos: d.productos || [], locales: d.locales || [] };
+  } catch {}
+  return { notas: [], productos: [], locales: [] };
+}
+function guardar() {
+  try { localStorage.setItem(CLAVE, JSON.stringify(datos)); } catch { alert('No se pudo guardar en este teléfono.'); }
+}
+function leerTab() {
+  try { const t = localStorage.getItem(CLAVE + '-tab'); if (TITULOS[t]) return t; } catch {}
+  return 'notas';
+}
+const id = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+const num = v => { const n = parseFloat(String(v).replace(/\./g, '').replace(',', '.')); return isFinite(n) ? n : 0; };
+const plata = n => '$' + n.toLocaleString('es-AR', { maximumFractionDigits: n < 100 ? 2 : 0 });
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const fecha = t => new Date(t).toLocaleDateString('es-AR', { day: 'numeric', month: 'short' });
+
+function cuentas(bulto, unidades, venta) {
+  const b = num(bulto), u = num(unidades) || 1, v = num(venta);
+  const costo = b / u;
+  const ganUnidad = v - costo;
+  return { costo, u, v, ganUnidad, ganBulto: ganUnidad * u, porc: costo > 0 ? ganUnidad / costo * 100 : 0, hay: b > 0 };
+}
+
+function cambiarTab(t) {
+  tab = t; filtro = '';
+  try { localStorage.setItem(CLAVE + '-tab', t); } catch {}
+  dibujar(); scrollTo(0, 0);
+}
+
+function dibujar() {
+  document.getElementById('titulo').textContent = TITULOS[tab];
+  document.querySelectorAll('#menu button').forEach(b => b.classList.toggle('activo', b.dataset.tab === tab));
+  const v = document.getElementById('vista');
+  v.innerHTML = { notas: vistaNotas, productos: vistaProductos, calcular: vistaCalcular, locales: vistaLocales }[tab]();
+  if (tab === 'calcular') conectarCalculadora();
+  const b = v.querySelector('.buscar');
+  if (b) { b.oninput = () => { filtro = b.value; const p = b.selectionStart; dibujar(); const nb = document.querySelector('.buscar'); nb.focus(); nb.setSelectionRange(p, p); }; }
+}
+
+function coincide(...campos) {
+  const f = filtro.trim().toLowerCase();
+  return !f || campos.some(c => String(c || '').toLowerCase().includes(f));
+}
+const cajaBuscar = ph => `<input class="buscar" type="search" placeholder="${ph}" value="${esc(filtro)}">`;
+
+/* ---------- Notas ---------- */
+function vistaNotas() {
+  const lista = datos.notas.filter(n => coincide(n.texto));
+  return `<button class="grande" onclick="editarNota()">+ Anotar algo</button>
+    ${datos.notas.length > 3 ? cajaBuscar('Buscar en las notas…') : ''}
+    ${lista.length ? lista.map(n => `<div class="tarjeta">
+      <p style="color:var(--ink);white-space:pre-wrap;margin:0">${esc(n.texto)}</p>
+      <div class="fila fin"><span class="chip">${fecha(n.fecha)}</span>
+        <button class="chico" onclick="editarNota('${n.id}')">Cambiar</button>
+        <button class="chico borrar" onclick="borrar('notas','${n.id}')">Borrar</button></div></div>`).join('')
+      : `<p class="vacio">Acá anotás lo que quieras: ideas, precios que viste, lo que te dijeron…</p>`}
+    ${pie()}`;
+}
+function editarNota(nid) {
+  const n = datos.notas.find(x => x.id === nid) || { texto: '' };
+  abrir(`<h2>${nid ? 'Cambiar nota' : 'Nueva nota'}</h2>
+    <textarea name="texto" required autofocus placeholder="Escribí acá…">${esc(n.texto)}</textarea>
+    <button class="grande" value="ok">Guardar</button><button type="button" style="width:100%" onclick="cerrar()">Cancelar</button>`,
+    f => {
+      if (nid) n.texto = f.texto; else datos.notas.unshift({ id: id(), texto: f.texto, fecha: Date.now() });
+    });
+}
+
+/* ---------- Productos ---------- */
+function vistaProductos() {
+  const nombreLocal = lid => datos.locales.find(l => l.id === lid)?.nombre || '';
+  const lista = datos.productos.filter(p => coincide(p.nombre, p.nota, nombreLocal(p.local)))
+    .sort((a, b) => (a.comprado === b.comprado ? 0 : a.comprado ? 1 : -1));
+  return `<button class="grande" onclick="editarProducto()">+ Agregar producto</button>
+    ${datos.productos.length > 3 ? cajaBuscar('Buscar producto o local…') : ''}
+    ${lista.length ? lista.map(p => {
+      const c = cuentas(p.bulto, p.unidades, p.venta);
+      const loc = nombreLocal(p.local);
+      return `<div class="tarjeta" style="${p.comprado ? 'opacity:.7' : ''}">
+        <div class="fila" style="justify-content:space-between"><h3>${esc(p.nombre)}</h3>
+          <span class="chip ${p.comprado ? 'ok' : ''}">${p.comprado ? '✓ Ya lo compré' : 'Lo busco'}</span></div>
+        ${loc ? `<p>🏪 ${esc(loc)}</p>` : ''}
+        ${p.nota ? `<p style="white-space:pre-wrap">${esc(p.nota)}</p>` : ''}
+        ${c.hay ? `<div class="cifras">
+          <div class="cifra"><small>Cada uno me sale</small><b>${plata(c.costo)}</b></div>
+          ${c.v ? `<div class="cifra"><small>Lo vendo a</small><b>${plata(c.v)}</b></div>
+          <div class="cifra"><small>Gano por bulto</small><b class="${c.ganBulto >= 0 ? 'verde' : 'rojo'}">${plata(c.ganBulto)}</b></div>` : ''}
+        </div>` : ''}
+        <div class="fila fin">
+          <button class="chico" onclick="marcar('${p.id}')">${p.comprado ? 'Volver a buscar' : '✓ Comprado'}</button>
+          <button class="chico" onclick="editarProducto('${p.id}')">Cambiar</button>
+          <button class="chico borrar" onclick="borrar('productos','${p.id}')">Borrar</button></div></div>`;
+    }).join('') : `<p class="vacio">Anotá acá lo que querés conseguir para vender, cuánto sale y dónde comprarlo.</p>`}
+    ${pie()}`;
+}
+function editarProducto(pid, base) {
+  const p = datos.productos.find(x => x.id === pid) || { nombre: '', nota: '', bulto: '', unidades: '', venta: '', local: '', ...base };
+  const opciones = datos.locales.map(l => `<option value="${l.id}" ${l.id === p.local ? 'selected' : ''}>${esc(l.nombre)}</option>`).join('');
+  abrir(`<h2>${pid ? 'Cambiar producto' : 'Nuevo producto'}</h2>
+    <label>¿Qué es?</label><input name="nombre" required value="${esc(p.nombre)}" placeholder="Ej: medias de algodón">
+    <div class="dos">
+      <label>Precio del bulto<input name="bulto" inputmode="decimal" value="${esc(p.bulto)}" placeholder="$"></label>
+      <label>Unidades que trae<input name="unidades" inputmode="numeric" value="${esc(p.unidades)}" placeholder="Ej: 12"></label>
+    </div>
+    <label>¿A cuánto vendo cada uno?</label><input name="venta" inputmode="decimal" value="${esc(p.venta)}" placeholder="$ (opcional)">
+    <label>¿Dónde se compra?</label>
+    <select name="local"><option value="">— Sin elegir —</option>${opciones}</select>
+    ${datos.locales.length ? '' : '<p class="ayuda">Primero cargá locales en la pestaña 🏪 Locales.</p>'}
+    <label>Notas</label><textarea name="nota" placeholder="Talles, colores, mínimo de compra…">${esc(p.nota)}</textarea>
+    <button class="grande" value="ok">Guardar</button><button type="button" style="width:100%" onclick="cerrar()">Cancelar</button>`,
+    f => {
+      if (pid) Object.assign(p, f);
+      else { datos.productos.unshift({ id: id(), comprado: false, ...f }); cambiarTab('productos'); }
+    });
+}
+function marcar(pid) {
+  const p = datos.productos.find(x => x.id === pid);
+  p.comprado = !p.comprado; guardar(); dibujar();
+}
+
+/* ---------- Calcular ---------- */
+function vistaCalcular() {
+  return `<p class="ayuda">Poné lo que pagás y te digo cuánto te sale cada uno y cuánto ganás.</p>
+    <label>¿Cuánto pagás el bulto o paquete?</label><input id="c-bulto" inputmode="decimal" placeholder="$" value="${esc(calc.bulto)}">
+    <label>¿Cuántas unidades trae?</label><input id="c-unidades" inputmode="numeric" placeholder="Ej: 12" value="${esc(calc.unidades)}">
+    <label>¿A cuánto vendés cada una?</label><input id="c-venta" inputmode="decimal" placeholder="$" value="${esc(calc.venta)}">
+    <div id="c-res"></div>
+    <button class="grande" onclick="editarProducto(null,{...calc})">Guardar como producto</button>
+    <button style="width:100%" onclick="calc.bulto=calc.unidades=calc.venta='';dibujar()">Borrar números</button>`;
+}
+function conectarCalculadora() {
+  ['bulto', 'unidades', 'venta'].forEach(k => document.getElementById('c-' + k).oninput = e => { calc[k] = e.target.value; resultado(); });
+  resultado();
+}
+function resultado() {
+  const c = cuentas(calc.bulto, calc.unidades, calc.venta);
+  const r = document.getElementById('c-res');
+  if (!c.hay) { r.innerHTML = ''; return; }
+  const sug = [30, 50, 100].map(p => `<span class="chip">+${p}% → ${plata(c.costo * (1 + p / 100))}</span>`).join('');
+  r.innerHTML = `<div class="resultado">
+    <p>Cada uno te sale <b>${plata(c.costo)}</b></p>
+    ${c.v ? `<p>Ganás <b class="${c.ganUnidad >= 0 ? 'verde' : 'rojo'}">${plata(c.ganUnidad)}</b> por unidad (${Math.round(c.porc)}%)</p>
+      <p>Por todo el bulto ganás <b class="${c.ganBulto >= 0 ? 'verde' : 'rojo'}">${plata(c.ganBulto)}</b></p>
+      ${c.ganUnidad < 0 ? '<p class="rojo">⚠️ Así perdés plata: vendelo más caro.</p>' : ''}`
+      : `<p class="ayuda">Para ganar, podrías venderlo a:</p><div class="atajos">${sug}</div>`}
+  </div>`;
+}
+
+/* ---------- Locales ---------- */
+function vistaLocales() {
+  const lista = datos.locales.filter(l => coincide(l.nombre, l.direccion, l.vende, l.nota));
+  const tel = t => t.replace(/[^\d+]/g, '');
+  return `<button class="grande" onclick="editarLocal()">+ Agregar local</button>
+    ${datos.locales.length > 3 ? cajaBuscar('Buscar local o lo que vende…') : ''}
+    ${lista.length ? lista.map(l => {
+      const cuantos = datos.productos.filter(p => p.local === l.id).length;
+      return `<div class="tarjeta"><h3>${esc(l.nombre)}</h3>
+        ${l.vende ? `<p>🛍️ ${esc(l.vende)}</p>` : ''}
+        ${l.direccion ? `<p>📍 <a href="https://www.google.com/maps/search/${encodeURIComponent(l.direccion)}" target="_blank" rel="noopener">${esc(l.direccion)}</a></p>` : ''}
+        ${l.telefono ? `<p>📞 <a href="tel:${tel(l.telefono)}">${esc(l.telefono)}</a></p>` : ''}
+        ${l.nota ? `<p style="white-space:pre-wrap">${esc(l.nota)}</p>` : ''}
+        ${cuantos ? `<p><span class="chip">${cuantos} producto${cuantos > 1 ? 's' : ''} anotado${cuantos > 1 ? 's' : ''}</span></p>` : ''}
+        <div class="fila fin">
+          <button class="chico" onclick="editarLocal('${l.id}')">Cambiar</button>
+          <button class="chico borrar" onclick="borrar('locales','${l.id}')">Borrar</button></div></div>`;
+    }).join('') : `<p class="vacio">Anotá los locales donde comprás por mayor: qué venden, dónde quedan y su teléfono.</p>`}
+    ${pie()}`;
+}
+function editarLocal(lid) {
+  const l = datos.locales.find(x => x.id === lid) || { nombre: '', direccion: '', telefono: '', vende: '', nota: '' };
+  abrir(`<h2>${lid ? 'Cambiar local' : 'Nuevo local'}</h2>
+    <label>Nombre del local</label><input name="nombre" required value="${esc(l.nombre)}" placeholder="Ej: Mayorista Once">
+    <label>¿Qué vende?</label><input name="vende" value="${esc(l.vende)}" placeholder="Ej: ropa interior, medias">
+    <label>Dirección</label><input name="direccion" value="${esc(l.direccion)}" placeholder="Calle y número">
+    <label>Teléfono / WhatsApp</label><input name="telefono" inputmode="tel" value="${esc(l.telefono)}">
+    <label>Notas</label><textarea name="nota" placeholder="Horarios, compra mínima, cómo pagar…">${esc(l.nota)}</textarea>
+    <button class="grande" value="ok">Guardar</button><button type="button" style="width:100%" onclick="cerrar()">Cancelar</button>`,
+    f => { if (lid) Object.assign(l, f); else datos.locales.unshift({ id: id(), ...f }); });
+}
+
+/* ---------- Comunes ---------- */
+let alGuardar = null;
+function abrir(html, cb) {
+  const m = document.getElementById('modal'), f = document.getElementById('formModal');
+  f.innerHTML = html; alGuardar = cb; m.showModal();
+}
+function cerrar() { document.getElementById('modal').close(); }
+document.getElementById('formModal').onsubmit = e => {
+  const valores = Object.fromEntries(new FormData(e.target));
+  for (const k in valores) valores[k] = valores[k].trim();
+  if (alGuardar) alGuardar(valores);
+  alGuardar = null; guardar(); dibujar();
+};
+function borrar(lista, x) {
+  if (!confirm('¿Seguro que lo querés borrar?')) return;
+  datos[lista] = datos[lista].filter(i => i.id !== x);
+  if (lista === 'locales') datos.productos.forEach(p => { if (p.local === x) p.local = ''; });
+  guardar(); dibujar();
+}
+
+function pie() {
+  return `<div class="pie">Todo se guarda en este teléfono.<br>
+    <button onclick="exportar()">Guardar copia</button><button onclick="document.getElementById('archivo').click()">Recuperar copia</button></div>`;
+}
+function exportar() {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(datos, null, 1)], { type: 'application/json' }));
+  a.download = 'mis-compras-' + new Date().toISOString().slice(0, 10) + '.json';
+  a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+document.getElementById('archivo').onchange = async e => {
+  const file = e.target.files[0]; e.target.value = '';
+  if (!file) return;
+  try {
+    const d = JSON.parse(await file.text());
+    if (!confirm('Esto reemplaza lo que tenés ahora por la copia. ¿Seguir?')) return;
+    datos = { notas: d.notas || [], productos: d.productos || [], locales: d.locales || [] };
+    guardar(); dibujar();
+  } catch { alert('Ese archivo no es una copia válida.'); }
+};
+
+document.querySelectorAll('#menu button').forEach(b => b.onclick = () => cambiarTab(b.dataset.tab));
+dibujar();
+if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js');
+</script>
+</body>
+</html>
