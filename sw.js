@@ -1,5 +1,5 @@
-const CACHE = 'mis-compras-v2';
-const BASE = ['./', './index.html', './manifest.webmanifest', './icono-192.png', './icono-512.png', './icono.svg'];
+const CACHE = 'mis-compras-v4';
+const BASE = ['./', './index.html', './manifest.webmanifest', './icono-192.png', './icono-512.png', './icono.svg', './frida.svg'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(BASE)));
