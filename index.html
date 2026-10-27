@@ -48,8 +48,8 @@ input:focus,textarea:focus,select:focus{outline:3px solid var(--acento-soft);bor
 .dos{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .buscar{margin:4px 0 4px}
 nav{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--line);
-  display:grid;grid-template-columns:repeat(4,1fr);padding-bottom:env(safe-area-inset-bottom)}
-nav button{border:0;border-radius:0;background:none;display:flex;flex-direction:column;align-items:center;gap:2px;padding:8px 2px;min-height:72px;font-size:15px;color:var(--muted)}
+  display:grid;grid-template-columns:repeat(5,1fr);padding-bottom:env(safe-area-inset-bottom)}
+nav button{border:0;border-radius:0;background:none;display:flex;flex-direction:column;align-items:center;gap:2px;padding:8px 2px;min-height:72px;font-size:14px;color:var(--muted)}
 nav button span{font-size:26px;line-height:1}
 nav button.activo{color:var(--acento);font-weight:700;background:var(--acento-soft)}
 dialog{border:0;border-radius:20px;padding:0;width:min(600px,calc(100% - 24px));max-height:calc(100% - 24px);background:var(--bg);color:var(--ink)}
@@ -63,6 +63,22 @@ dialog h2{margin:0 0 4px}
 .atajos{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
 .pie{color:var(--muted);font-size:15px;text-align:center;margin:28px 0 8px}
 .pie button{font-size:15px;min-height:40px;margin:4px}
+body.en-chat{padding-bottom:calc(170px + env(safe-area-inset-bottom))}
+.msj{max-width:88%;padding:10px 14px;border-radius:16px;margin:10px 0;white-space:pre-wrap;word-wrap:break-word}
+.msj.yo{margin-left:auto;background:var(--acento);color:#fff;border-bottom-right-radius:4px}
+.msj.asis{background:var(--card);border:1px solid var(--line);border-bottom-left-radius:4px}
+.msj.pensando{color:var(--muted);font-style:italic}
+.propuesta{background:var(--acento-soft);border-radius:12px;padding:10px 12px;margin:8px 0 0}
+.propuesta p{margin:0 0 8px;color:var(--ink)}
+.propuesta button{min-height:44px}
+.sugerencias{display:flex;flex-direction:column;gap:8px;margin:12px 0}
+.sugerencias button{text-align:left}
+.escribir{position:fixed;left:0;right:0;bottom:calc(72px + env(safe-area-inset-bottom));background:var(--bg);border-top:1px solid var(--line);padding:10px 16px}
+.escribir>div{max-width:640px;margin:0 auto;display:flex;gap:8px;align-items:flex-end}
+.escribir textarea{min-height:52px;max-height:140px;padding:12px}
+.escribir button{flex:none;width:52px;height:52px;padding:0;font-size:22px}
+.escribir .enviar{background:var(--acento);border-color:var(--acento);color:#fff}
+.escribir .mic.grabando{background:var(--rojo);border-color:var(--rojo);color:#fff}
 </style>
 </head>
 <body>
@@ -71,9 +87,10 @@ dialog h2{margin:0 0 4px}
 
 <nav id="menu">
   <button data-tab="notas"><span>📝</span>Notas</button>
-  <button data-tab="productos"><span>📦</span>Lo que busco</button>
+  <button data-tab="productos"><span>📦</span>Busco</button>
   <button data-tab="calcular"><span>🧮</span>Calcular</button>
   <button data-tab="locales"><span>🏪</span>Locales</button>
+  <button data-tab="asistente"><span>💬</span>Ayuda</button>
 </nav>
 
 <dialog id="modal"><form method="dialog" id="formModal"></form></dialog>
@@ -81,7 +98,8 @@ dialog h2{margin:0 0 4px}
 
 <script>
 const CLAVE = 'mis-compras-v1';
-const TITULOS = { notas: 'Notas', productos: 'Lo que busco', calcular: 'Calcular', locales: 'Locales' };
+const TITULOS = { notas: 'Notas', productos: 'Lo que busco', calcular: 'Calcular', locales: 'Locales', asistente: 'Tu asistente' };
+const API = 'https://itultpcdafpxpgtblgfb.supabase.co/functions/v1/mis-compras';
 let datos = cargar();
 let tab = leerTab();
 let filtro = '';
@@ -124,8 +142,11 @@ function dibujar() {
   document.getElementById('titulo').textContent = TITULOS[tab];
   document.querySelectorAll('#menu button').forEach(b => b.classList.toggle('activo', b.dataset.tab === tab));
   const v = document.getElementById('vista');
-  v.innerHTML = { notas: vistaNotas, productos: vistaProductos, calcular: vistaCalcular, locales: vistaLocales }[tab]();
+  document.body.classList.toggle('en-chat', tab === 'asistente');
+  document.getElementById('escribir')?.remove();
+  v.innerHTML = { notas: vistaNotas, productos: vistaProductos, calcular: vistaCalcular, locales: vistaLocales, asistente: vistaAsistente }[tab]();
   if (tab === 'calcular') conectarCalculadora();
+  if (tab === 'asistente') conectarChat();
   const b = v.querySelector('.buscar');
   if (b) { b.oninput = () => { filtro = b.value; const p = b.selectionStart; dibujar(); const nb = document.querySelector('.buscar'); nb.focus(); nb.setSelectionRange(p, p); }; }
 }
@@ -270,6 +291,126 @@ function editarLocal(lid) {
     <button class="grande" value="ok">Guardar</button><button type="button" style="width:100%" onclick="cerrar()">Cancelar</button>`,
     f => { if (lid) Object.assign(l, f); else datos.locales.unshift({ id: id(), ...f }); });
 }
+
+/* ---------- Asistente ---------- */
+const CLAVE_CHAT = CLAVE + '-chat', CLAVE_CODIGO = CLAVE + '-codigo';
+let chat = (() => { try { return JSON.parse(localStorage.getItem(CLAVE_CHAT)) || []; } catch { return []; } })();
+let esperando = false;
+function codigo() { try { return localStorage.getItem(CLAVE_CODIGO) || ''; } catch { return ''; } }
+(() => {
+  const c = new URLSearchParams(location.hash.slice(1)).get('codigo');
+  if (!c) return;
+  try { localStorage.setItem(CLAVE_CODIGO, c); } catch {}
+  history.replaceState(null, '', location.pathname + location.search);
+})();
+function guardarChat() { chat = chat.slice(-60); try { localStorage.setItem(CLAVE_CHAT, JSON.stringify(chat)); } catch {} }
+
+const SUGERENCIAS = ['¿A cuánto conviene vender lo que anoté?', '¿Qué le pregunto al mayorista antes de comprar?', '¿Qué cosas se venden bien para empezar?'];
+const NOMBRE_ACCION = { agregar_nota: 'Guardar nota', agregar_producto: 'Anotar producto', agregar_local: 'Anotar local', marcar_comprado: 'Marcar como comprado' };
+
+function vistaAsistente() {
+  if (!codigo()) return `<p class="vacio">Para usar el asistente, abrí una vez el link especial que te pasó Daniela.</p>`;
+  const lista = chat.map((m, i) => `<div class="msj ${m.rol === 'user' ? 'yo' : 'asis'}">${esc(m.texto).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')}${
+    (m.acciones || []).map((a, j) => a.hecha ? `<div class="propuesta"><p>✓ ${a.hecha}</p></div>` : `<div class="propuesta"><p>${esc(describir(a))}</p>
+      <button class="chico" onclick="aplicar(${i},${j})">✓ ${NOMBRE_ACCION[a.accion] || 'Guardar'}</button>
+      <button class="chico" onclick="descartar(${i},${j})">No</button></div>`).join('')}</div>`).join('');
+  return `${chat.length ? '' : `<p class="ayuda">Preguntame lo que quieras sobre tus compras: precios, cuentas, qué comprar, dónde. También puedo anotarte cosas.</p>
+    <div class="sugerencias">${SUGERENCIAS.map(s => `<button onclick="enviar(this.textContent)">${s}</button>`).join('')}</div>`}
+    ${lista}
+    ${esperando ? '<div class="msj asis pensando">Pensando…</div>' : ''}
+    ${chat.length ? '<div class="pie"><button onclick="if(confirm(\'¿Borrar la charla?\')){chat=[];guardarChat();dibujar()}">Empezar charla nueva</button></div>' : ''}`;
+}
+function conectarChat() {
+  if (!codigo()) return;
+  const caja = document.createElement('div');
+  caja.className = 'escribir'; caja.id = 'escribir';
+  const voz = window.SpeechRecognition || window.webkitSpeechRecognition;
+  caja.innerHTML = `<div><textarea id="pregunta" rows="1" placeholder="Escribí tu pregunta…"></textarea>
+    ${voz ? '<button class="mic" id="mic" title="Hablar">🎤</button>' : ''}
+    <button class="enviar" id="btnEnviar" title="Enviar">➤</button></div>`;
+  document.body.appendChild(caja);
+  caja.style.bottom = document.getElementById('menu').offsetHeight + 'px';
+  const t = document.getElementById('pregunta');
+  t.oninput = () => { t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 140) + 'px'; };
+  document.getElementById('btnEnviar').onclick = () => { if (t.value.trim()) enviar(t.value); };
+  if (voz) {
+    const mic = document.getElementById('mic');
+    mic.onclick = () => {
+      const r = new voz(); r.lang = 'es-AR'; r.interimResults = true;
+      const antes = t.value ? t.value + ' ' : '';
+      r.onresult = e => { t.value = antes + [...e.results].map(x => x[0].transcript).join(''); t.oninput(); };
+      r.onend = () => mic.classList.remove('grabando');
+      r.onerror = () => mic.classList.remove('grabando');
+      mic.classList.add('grabando'); r.start();
+    };
+  }
+  scrollTo(0, document.body.scrollHeight);
+}
+
+function contexto() {
+  const l = id => datos.locales.find(x => x.id === id)?.nombre;
+  const prods = datos.productos.map(p => {
+    const c = cuentas(p.bulto, p.unidades, p.venta);
+    return `- ${p.nombre}${p.comprado ? ' (ya comprado)' : ' (lo busca)'}` +
+      (c.hay ? `: bulto ${plata(num(p.bulto))}, ${c.u} unidades, cada una ${plata(c.costo)}` : '') +
+      (c.v ? `, la vende a ${plata(c.v)} (gana ${plata(c.ganUnidad)} c/u, ${Math.round(c.porc)}%)` : '') +
+      (l(p.local) ? `, se compra en ${l(p.local)}` : '') + (p.nota ? `. Nota: ${p.nota}` : '');
+  });
+  const locs = datos.locales.map(x => `- ${x.nombre}` + [x.vende && 'vende ' + x.vende, x.direccion, x.telefono && 'tel ' + x.telefono, x.nota].filter(Boolean).map(s => ', ' + s).join(''));
+  const notas = datos.notas.slice(0, 30).map(n => `- (${fecha(n.fecha)}) ${n.texto}`);
+  return `PRODUCTOS:\n${prods.join('\n') || '(ninguno)'}\n\nLOCALES:\n${locs.join('\n') || '(ninguno)'}\n\nNOTAS:\n${notas.join('\n') || '(ninguna)'}`;
+}
+
+async function enviar(txt) {
+  txt = txt.trim();
+  if (!txt || esperando) return;
+  const historial = chat.slice(-16).map(m => ({ rol: m.rol, texto: m.texto }));
+  chat.push({ rol: 'user', texto: txt }); guardarChat();
+  esperando = true; dibujar();
+  let resp;
+  try {
+    const r = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accion: 'preguntar', codigo: codigo(), mensaje: txt, historial, contexto: contexto() }) });
+    const d = await r.json();
+    if (r.status === 401) resp = { texto: 'No me puedo conectar: el link especial no es válido. Pedile a Daniela uno nuevo.' };
+    else if (d.error === 'ocupado') resp = { texto: 'Estoy con mucha gente en este momento. Probá de nuevo en un minuto, por favor.' };
+    else if (d.error || (!d.texto && !d.acciones?.length)) resp = { texto: 'Uy, algo falló. Probá preguntarme de nuevo.' };
+    else resp = { texto: d.texto || 'Te dejo esto para guardar:', acciones: d.acciones || [] };
+  } catch { resp = { texto: 'No hay internet o no me pude conectar. Probá de nuevo en un rato.' }; }
+  esperando = false;
+  chat.push({ rol: 'assistant', ...resp }); guardarChat();
+  if (tab === 'asistente') dibujar();
+}
+
+const plataSimple = n => n ? plata(Number(n)) : '';
+function describir(a) {
+  if (a.accion === 'agregar_nota') return `Nota: "${a.texto}"`;
+  if (a.accion === 'agregar_local') return `Local: ${a.nombre}${a.vende ? ' — ' + a.vende : ''}${a.direccion ? ' — ' + a.direccion : ''}${a.telefono ? ' — tel ' + a.telefono : ''}`;
+  if (a.accion === 'marcar_comprado') return `Marcar "${a.nombre}" como ya comprado`;
+  if (a.accion === 'agregar_producto') return `Producto: ${a.nombre}` + [a.bulto && 'bulto ' + plataSimple(a.bulto), a.unidades && a.unidades + ' unidades', a.venta && 'lo vendés a ' + plataSimple(a.venta), a.local && 'en ' + a.local].filter(Boolean).map(s => ' · ' + s).join('');
+  return '';
+}
+const buscarPorNombre = (lista, n) => { const k = String(n || '').trim().toLowerCase(); return lista.find(x => x.nombre.toLowerCase() === k) || lista.find(x => x.nombre.toLowerCase().includes(k) || k.includes(x.nombre.toLowerCase())); };
+const str = v => v == null ? '' : String(v);
+function aplicar(i, j) {
+  const a = chat[i].acciones[j];
+  let hecho = '';
+  if (a.accion === 'agregar_nota') { datos.notas.unshift({ id: id(), texto: str(a.texto), fecha: Date.now() }); hecho = 'Nota guardada'; }
+  else if (a.accion === 'agregar_local') {
+    datos.locales.unshift({ id: id(), nombre: str(a.nombre), vende: str(a.vende), direccion: str(a.direccion), telefono: str(a.telefono), nota: str(a.nota) }); hecho = 'Local anotado';
+  } else if (a.accion === 'agregar_producto') {
+    const loc = a.local ? buscarPorNombre(datos.locales, a.local) : null;
+    datos.productos.unshift({ id: id(), comprado: false, nombre: str(a.nombre), bulto: str(a.bulto), unidades: str(a.unidades), venta: str(a.venta), local: loc?.id || '',
+      nota: [str(a.nota), a.local && !loc ? 'Local: ' + a.local : ''].filter(Boolean).join('\n') });
+    hecho = 'Producto anotado en "Lo que busco"';
+  } else if (a.accion === 'marcar_comprado') {
+    const p = buscarPorNombre(datos.productos, a.nombre);
+    if (!p) { alert('No encontré ese producto en tu lista.'); return; }
+    p.comprado = true; hecho = `"${p.nombre}" marcado como comprado`;
+  }
+  a.hecha = hecho; guardar(); guardarChat(); dibujar();
+}
+function descartar(i, j) { chat[i].acciones.splice(j, 1); guardarChat(); dibujar(); }
 
 /* ---------- Comunes ---------- */
 let alGuardar = null;
