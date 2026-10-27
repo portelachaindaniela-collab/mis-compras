@@ -70,6 +70,27 @@ dialog h2{margin:0 0 4px}
 .fila-asis{display:flex;gap:8px;align-items:flex-start}
 .fila-asis>img{width:40px;height:52px;object-fit:cover;object-position:top;flex:none;margin-top:10px}
 .fila-asis .msj{margin:10px 0}
+.segmento{display:grid;grid-template-columns:1fr 1fr;background:var(--inset);border-radius:14px;padding:4px;gap:4px;margin:0 0 6px}
+.segmento button{border:0;background:none;min-height:42px;font-size:17px;color:var(--muted);border-radius:10px}
+.segmento button.activo{background:var(--card);color:var(--ink);font-weight:700;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.nota{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:8px 12px;margin:8px 0}
+.nota>p,.lista-gasto{margin:0;font-size:17px;line-height:1.35;white-space:pre-wrap;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.lista-gasto{color:var(--muted);font-size:15px;-webkit-line-clamp:2;margin-top:2px}
+.nota.abierta>p,.lista-gasto.abierta{display:block}
+.nota-pie{display:flex;align-items:center;gap:4px;margin-top:4px;font-size:14px;color:var(--muted)}
+.nota-pie>span{flex:1}
+.mini{min-height:36px;min-width:40px;padding:2px 8px;font-size:16px;border:0;background:var(--inset);border-radius:10px}
+.mini.texto{font-size:14px;color:var(--acento);font-weight:700}
+.gasto.pendiente{border-left:4px solid var(--rojo)}
+.resumen-gastos{background:var(--card);border:2px solid var(--acento);border-radius:16px;padding:10px 14px;margin:8px 0}
+.resumen-gastos>p{margin:0;font-weight:700}
+.subtitulo{font-size:17px;color:var(--muted);margin:20px 0 4px}
+label.check{display:flex;align-items:center;gap:10px;font-size:19px;margin:16px 0 4px}
+label.check input{width:26px;height:26px;flex:none}
+.suave{color:var(--muted);font-weight:400}
+.por-tipo{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:8px;font-size:15px;color:var(--muted)}
+.por-tipo b{color:var(--ink)}
+#avisoFrida{width:44px;height:58px;object-fit:cover;object-position:top;flex:none}
 .aviso{width:min(420px,calc(100% - 32px))}
 .aviso form{padding:20px 18px 14px}
 .aviso p{margin:0 0 12px;font-size:20px}
@@ -122,7 +143,7 @@ body.en-chat{padding-bottom:calc(170px + env(safe-area-inset-bottom))}
 
 <dialog id="modal"><form method="dialog" id="formModal"></form></dialog>
 <dialog id="aviso" class="aviso"><form method="dialog">
-  <p id="avisoTexto"></p>
+  <div class="fila" style="flex-wrap:nowrap;align-items:flex-start"><img id="avisoFrida" src="frida.svg" alt="" hidden><p id="avisoTexto"></p></div>
   <input id="avisoCampo" hidden>
   <div class="fila fin"><button value="no" id="avisoNo">Cancelar</button><button value="si" id="avisoSi" class="si">Sí</button></div>
 </form></dialog>
@@ -140,9 +161,9 @@ const calc = { bulto: '', unidades: '', venta: '' };
 function cargar() {
   try {
     const d = JSON.parse(localStorage.getItem(CLAVE));
-    if (d) return { notas: d.notas || [], productos: d.productos || [], locales: d.locales || [] };
+    if (d) return { notas: d.notas || [], productos: d.productos || [], locales: d.locales || [], gastos: d.gastos || [] };
   } catch {}
-  return { notas: [], productos: [], locales: [] };
+  return { notas: [], productos: [], locales: [], gastos: [] };
 }
 function guardar() {
   try { localStorage.setItem(CLAVE, JSON.stringify(datos)); } catch { avisar('No se pudo guardar en este teléfono.'); }
@@ -171,7 +192,7 @@ function cambiarTab(t) {
 }
 
 function dibujar() {
-  document.getElementById('titulo').textContent = TITULOS[tab];
+  document.getElementById('titulo').textContent = tab === 'notas' && subNotas === 'gastos' ? 'Gastos casa' : TITULOS[tab];
   document.querySelectorAll('#menu button').forEach(b => b.classList.toggle('activo', b.dataset.tab === tab));
   const v = document.getElementById('vista');
   document.body.classList.toggle('en-chat', tab === 'asistente');
@@ -190,16 +211,22 @@ function coincide(...campos) {
 const cajaBuscar = ph => `<input class="buscar" type="search" placeholder="${ph}" value="${esc(filtro)}">`;
 
 /* ---------- Notas ---------- */
+let subNotas = 'notas';
+function pestanasNotas() {
+  return `<div class="segmento"><button class="${subNotas === 'notas' ? 'activo' : ''}" onclick="subNotas='notas';filtro='';dibujar()">📝 Notas</button>
+    <button class="${subNotas === 'gastos' ? 'activo' : ''}" onclick="subNotas='gastos';filtro='';dibujar()">🛒 Gastos casa</button></div>`;
+}
 function vistaNotas() {
+  if (subNotas === 'gastos') return pestanasNotas() + vistaGastos();
   const lista = datos.notas.filter(n => coincide(n.texto));
-  return `<button class="grande" onclick="editarNota()">+ Anotar algo</button>
+  return `${pestanasNotas()}<button class="grande" onclick="editarNota()">+ Anotar algo</button>
     ${datos.notas.length > 3 ? cajaBuscar('Buscar en las notas…') : ''}
-    ${lista.length ? lista.map(n => `<div class="tarjeta">
-      <p style="color:var(--ink);white-space:pre-wrap;margin:0">${esc(n.texto)}</p>
-      <div class="fila fin"><span class="chip">${fecha(n.fecha)}</span>
-        <button class="chico" onclick="editarNota('${n.id}')">Cambiar</button>
-        <button class="chico borrar" onclick="borrar('notas','${n.id}')">Borrar</button></div></div>`).join('')
-      : `<p class="vacio">Acá anotás lo que quieras: ideas, precios que viste, lo que te dijeron…</p>`}
+    ${lista.length ? lista.map(n => `<div class="nota" onclick="this.classList.toggle('abierta')">
+      <p>${esc(n.texto)}</p>
+      <div class="nota-pie"><span>${fecha(n.fecha)}${n.gasto ? ' · 🛒 en gastos' : ''}</span>
+        <button class="mini" onclick="event.stopPropagation();editarNota('${n.id}')" aria-label="Cambiar">✏️</button>
+        <button class="mini" onclick="event.stopPropagation();borrar('notas','${n.id}')" aria-label="Borrar">🗑️</button></div></div>`).join('')
+      : `<p class="vacio">Acá anotás lo que quieras: ideas, precios que viste, la lista del súper…</p>`}
     ${pie()}`;
 }
 function editarNota(nid) {
@@ -208,8 +235,101 @@ function editarNota(nid) {
     <textarea name="texto" required autofocus placeholder="Escribí acá…">${esc(n.texto)}</textarea>
     <button class="grande" value="ok">Guardar</button><button type="button" style="width:100%" onclick="cerrar()">Cancelar</button>`,
     f => {
-      if (nid) n.texto = f.texto; else datos.notas.unshift({ id: id(), texto: f.texto, fecha: Date.now() });
+      let nota = n;
+      if (nid) n.texto = f.texto; else { nota = { id: id(), texto: f.texto, fecha: Date.now() }; datos.notas.unshift(nota); }
+      setTimeout(() => ofrecerGasto(nota), 300);
     });
+}
+
+/* ---------- Gastos casa ---------- */
+const PALABRAS_SUPER = /\b(leche|pan|arroz|fideos?|aceite|yerba|az[uú]car|harina|huevos?|queso|manteca|yogur|carne|pollo|milanesas?|papas?|cebollas?|tomates?|lechuga|frutas?|verduras?|bananas?|manzanas?|naranjas?|caf[eé]|t[eé]|galletitas?|gaseosa|agua|jugo|vino|cerveza|sal|mayonesa|detergente|lavandina|jab[oó]n|shampoo|papel higi[eé]nico|rollo de cocina|servilletas?|pa[nñ]ales|dulce de leche|mermelada|at[uú]n|salchichas?|jam[oó]n|fiambre|polenta|lentejas|choclo|caldo|pur[eé]|galletas?|facturas?)\b/gi;
+const TIPOS_GASTO = ['Supermercado', 'Verdulería', 'Carnicería', 'Almacén', 'Servicios (luz, gas, internet)', 'Tarjeta de crédito', 'Farmacia', 'Otros'];
+const ICONO_TIPO = { 'Supermercado': '🛒', 'Verdulería': '🥬', 'Carnicería': '🥩', 'Almacén': '🏪', 'Servicios (luz, gas, internet)': '💡', 'Tarjeta de crédito': '💳', 'Farmacia': '💊', 'Otros': '🧾' };
+// Devuelve el tipo de gasto que parece ser la nota, o '' si no parece un gasto de la casa.
+function tipoDeGasto(texto) {
+  const t = String(texto || '');
+  if (/\b(tarjeta|visa|mastercard|amex|naranja|resumen de cuenta|cuotas?)\b/i.test(t)) return 'Tarjeta de crédito';
+  if (/\b(luz|gas|internet|edenor|edesur|metrogas|naturgy|aysa|wifi|cable|telecentro|fibertel|expensas|abl|factura de)\b/i.test(t)) return 'Servicios (luz, gas, internet)';
+  if (/\b(verduler[ií]a|verdu)\b/i.test(t)) return 'Verdulería';
+  if (/\b(carnicer[ií]a)\b/i.test(t)) return 'Carnicería';
+  if (/\b(almac[eé]n|chino|kiosco)\b/i.test(t)) return 'Almacén';
+  if (/\b(farmacia|remedios?|ibuprofeno|paracetamol)\b/i.test(t)) return 'Farmacia';
+  if (/\b(s[uú]per|supermercado|lista de (las )?compras|mercader[ií]a para la casa)\b/i.test(t)) return 'Supermercado';
+  const renglones = t.split(/\n|,/).map(s => s.trim()).filter(Boolean);
+  return renglones.length >= 3 && (t.match(PALABRAS_SUPER) || []).length >= 2 ? 'Supermercado' : '';
+}
+// Suma los precios que aparezcan en la lista ("leche $1.500", "pan 2300").
+function sumarPrecios(texto) {
+  let total = 0;
+  for (const r of String(texto || '').split(/\n|,(?!\d)/)) {
+    const m = r.match(/\$\s*([\d.]+(?:,\d+)?)|(?:^|\s)([\d.]{3,}(?:,\d+)?)\s*$/);
+    if (m) total += num(m[1] || m[2]);
+  }
+  return total;
+}
+async function ofrecerGasto(nota) {
+  const tipo = nota && !nota.gasto && !nota.noGasto ? tipoDeGasto(nota.texto) : '';
+  if (!tipo) return;
+  const si = await cartel(`${ICONO_TIPO[tipo]} ¿Esto es una compra o un gasto de la casa? ¿Lo agrego a Gastos casa? Así te voy sumando todo.`, { si: 'Sí, agregar', no: 'No', frida: true });
+  if (!si) { nota.noGasto = true; guardar(); return; }
+  editarGasto(null, { tipo, lista: nota.texto, monto: sumarPrecios(nota.texto) || '', notaId: nota.id });
+}
+const mesDe = t => new Date(t).toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });
+function vistaGastos() {
+  const ahora = new Date(), esteMes = g => { const d = new Date(g.fecha); return d.getMonth() === ahora.getMonth() && d.getFullYear() === ahora.getFullYear(); };
+  const delMes = datos.gastos.filter(esteMes);
+  const total = delMes.reduce((s, g) => s + num(g.monto), 0), pagado = delMes.filter(g => g.pagado).reduce((s, g) => s + num(g.monto), 0);
+  const sumaTipo = {};
+  delMes.forEach(g => { const t = g.tipo || 'Otros'; sumaTipo[t] = (sumaTipo[t] || 0) + num(g.monto); });
+  const porTipo = Object.entries(sumaTipo).sort((a, b) => b[1] - a[1]);
+  const anteriores = {};
+  datos.gastos.filter(g => !esteMes(g)).forEach(g => { const k = mesDe(g.fecha); anteriores[k] = (anteriores[k] || 0) + num(g.monto); });
+  const tarjeta = g => `<div class="nota gasto ${g.pagado ? '' : 'pendiente'}">
+    <div class="fila" style="justify-content:space-between"><b>${ICONO_TIPO[g.tipo] || '🧾'} ${esc((g.tipo || 'Otros').split(' (')[0])}${g.descripcion ? ` · <span class="suave">${esc(g.descripcion)}</span>` : ''}</b><b>${g.monto ? plata(num(g.monto)) : '$ ?'}</b></div>
+    ${g.lista ? `<p class="lista-gasto" onclick="this.classList.toggle('abierta')">${esc(g.lista)}</p>` : ''}
+    <div class="nota-pie"><span>${fecha(g.fecha)} · ${g.pagado ? '<span class="verde">✓ Pagado</span>' : '<span class="rojo">Falta pagar</span>'}</span>
+      ${g.pagado ? '' : `<button class="mini texto" onclick="pagarGasto('${g.id}')">✓ Ya pagué</button>`}
+      <button class="mini" onclick="editarGasto('${g.id}')" aria-label="Cambiar">✏️</button>
+      <button class="mini" onclick="borrar('gastos','${g.id}')" aria-label="Borrar">🗑️</button></div></div>`;
+  return `<div class="resumen-gastos">
+      <p>Gastos de ${mesDe(ahora)}</p>
+      <div class="cifras">
+        <div class="cifra"><small>Total</small><b>${plata(total)}</b></div>
+        <div class="cifra"><small>Pagado</small><b class="verde">${plata(pagado)}</b></div>
+        <div class="cifra"><small>Falta pagar</small><b class="${total - pagado > 0 ? 'rojo' : ''}">${plata(total - pagado)}</b></div>
+      </div>
+      ${porTipo.length > 1 ? `<div class="por-tipo">${porTipo.map(([t, m]) => `<span>${ICONO_TIPO[t] || '🧾'} ${esc(t.split(' (')[0])} <b>${plata(m)}</b></span>`).join('')}</div>` : ''}</div>
+    <button class="grande" onclick="editarGasto()">+ Anotar gasto</button>
+    ${delMes.length ? delMes.map(tarjeta).join('') : '<p class="vacio">Este mes todavía no anotaste gastos. Si escribís una lista del súper en Notas, te pregunto si la sumo acá.</p>'}
+    ${Object.keys(anteriores).length ? `<h3 class="subtitulo">Meses anteriores</h3>${Object.entries(anteriores).map(([m, t]) => `<div class="nota fila" style="justify-content:space-between"><span>${m}</span><b>${plata(t)}</b></div>`).join('')}` : ''}
+    ${pie()}`;
+}
+function editarGasto(gid, base) {
+  const g = datos.gastos.find(x => x.id === gid) || { tipo: '', descripcion: '', monto: '', lista: '', pagado: false, ...base };
+  abrir(`<h2>${gid ? 'Cambiar gasto' : 'Nuevo gasto de la casa'}</h2>
+    <label>¿Qué tipo de gasto es?</label>
+    <select name="tipo" required><option value="">— Elegí uno —</option>${TIPOS_GASTO.map(t => `<option ${t === g.tipo ? 'selected' : ''}>${t}</option>`).join('')}</select>
+    <label>Detalle <span class="suave">(opcional)</span></label><input name="descripcion" value="${esc(g.descripcion)}" placeholder="Ej: Coto, Visa, factura de luz">
+    <label>¿Cuánto fue?</label><input name="monto" inputmode="decimal" value="${esc(g.monto)}" placeholder="$">
+    ${base?.monto ? '<p class="ayuda">Sumé los precios que estaban en la lista. Cambialo si el ticket dio otra cosa.</p>' : ''}
+    <label class="check"><input type="checkbox" name="pagado" ${g.pagado ? 'checked' : ''}> Ya lo pagué</label>
+    <label>Lista o detalle</label><textarea name="lista" placeholder="Opcional">${esc(g.lista)}</textarea>
+    <button class="grande" value="ok">Guardar</button><button type="button" style="width:100%" onclick="cerrar()">Cancelar</button>`,
+    f => {
+      const valores = { tipo: f.tipo, descripcion: f.descripcion, monto: f.monto, lista: f.lista, pagado: f.pagado === 'on' };
+      if (gid) Object.assign(g, valores);
+      else {
+        const nuevo = { id: id(), fecha: Date.now(), ...valores, notaId: base?.notaId || '' };
+        datos.gastos.unshift(nuevo);
+        const n = datos.notas.find(x => x.id === nuevo.notaId);
+        if (n) n.gasto = nuevo.id;
+        subNotas = 'gastos'; if (tab !== 'asistente') tab = 'notas';
+      }
+    });
+}
+function pagarGasto(gid) {
+  const g = datos.gastos.find(x => x.id === gid);
+  g.pagado = true; guardar(); dibujar();
 }
 
 /* ---------- Productos ---------- */
@@ -394,7 +514,7 @@ function vistaCharlas() {
 
 const SUGERENCIAS = ['¿Cuánto sale la docena de medias por mayor?', '¿A cuánto conviene vender lo que anoté?','¿Qué le pregunto al mayorista antes de comprar?', '¿Qué cosas se venden bien para empezar?'];
 const ESTADOS = ['Pensando…', '🔎 Buscando en internet…', '🔎 Leyendo las páginas de los vendedores…', '🧮 Comparando precios y haciendo las cuentas…', 'Ya casi…'];
-const NOMBRE_ACCION ={ agregar_nota: 'Guardar nota', agregar_producto: 'Anotar producto', agregar_local: 'Anotar local', marcar_comprado: 'Marcar como comprado' };
+const NOMBRE_ACCION = { agregar_nota: 'Guardar nota', agregar_producto: 'Anotar producto', agregar_local: 'Anotar local', marcar_comprado: 'Marcar como comprado', agregar_gasto: 'Agregar a Gastos casa', marcar_gasto_pagado: 'Marcar como pagado' };
 
 function vistaAsistente() {
   if (!codigo()) return `<p class="vacio">Para usar el asistente, abrí una vez el link especial que te pasó Daniela.</p>`;
@@ -454,7 +574,8 @@ function contexto() {
   });
   const locs = datos.locales.map(x => `- ${x.nombre}` + [x.vende && 'vende ' + x.vende, x.direccion, x.telefono && 'tel ' + x.telefono, x.nota].filter(Boolean).map(s => ', ' + s).join(''));
   const notas = datos.notas.slice(0, 30).map(n => `- (${fecha(n.fecha)}) ${n.texto}`);
-  return `PRODUCTOS:\n${prods.join('\n') || '(ninguno)'}\n\nLOCALES:\n${locs.join('\n') || '(ninguno)'}\n\nNOTAS:\n${notas.join('\n') || '(ninguna)'}`;
+  const gastos = datos.gastos.slice(0, 40).map(g => `- (${fecha(g.fecha)}) ${g.tipo || 'Otros'}${g.descripcion ? ' · ' + g.descripcion : ''}: ${g.monto ? plata(num(g.monto)) : 'monto sin anotar'}, ${g.pagado ? 'pagado' : 'falta pagar'}`);
+  return `PRODUCTOS:\n${prods.join('\n') || '(ninguno)'}\n\nLOCALES:\n${locs.join('\n') || '(ninguno)'}\n\nNOTAS:\n${notas.join('\n') || '(ninguna)'}\n\nGASTOS CASA (los más nuevos primero):\n${gastos.join('\n') || '(ninguno)'}`;
 }
 
 async function enviar(txt) {
@@ -524,6 +645,8 @@ function describir(a) {
   if (a.accion === 'agregar_nota') return `Nota: "${a.texto}"`;
   if (a.accion === 'agregar_local') return `Local: ${a.nombre}${a.vende ? ' — ' + a.vende : ''}${a.direccion ? ' — ' + a.direccion : ''}${a.telefono ? ' — tel ' + a.telefono : ''}`;
   if (a.accion === 'marcar_comprado') return `Marcar "${a.nombre}" como ya comprado`;
+  if (a.accion === 'agregar_gasto') return `${ICONO_TIPO[a.tipo] || '🧾'} ${a.tipo || 'Otros'}${a.detalle ? ' · ' + a.detalle : ''}: ${a.monto ? plataSimple(a.monto) : 'monto a completar'} · ${a.pagado ? 'ya pagado' : 'falta pagar'}`;
+  if (a.accion === 'marcar_gasto_pagado') return `Marcar como pagado: ${a.tipo || ''}${a.detalle ? ' · ' + a.detalle : ''}`;
   if (a.accion === 'agregar_producto') return `Producto: ${a.nombre}` + [a.bulto && 'bulto ' + plataSimple(a.bulto), a.unidades && a.unidades + ' unidades', a.venta && 'lo vendés a ' + plataSimple(a.venta), a.local && 'en ' + a.local].filter(Boolean).map(s => ' · ' + s).join('');
   return '';
 }
@@ -532,7 +655,22 @@ const str = v => v == null ? '' : String(v);
 function aplicar(i, j) {
   const a = chat[i].acciones[j];
   let hecho = '';
-  if (a.accion === 'agregar_nota') { datos.notas.unshift({ id: id(), texto: str(a.texto), fecha: Date.now() }); hecho = 'Nota guardada'; }
+  if (a.accion === 'agregar_nota') {
+    const nota = { id: id(), texto: str(a.texto), fecha: Date.now() };
+    datos.notas.unshift(nota); hecho = 'Nota guardada';
+    // Si Frida ya propuso el gasto en el mismo mensaje, no se pregunta dos veces.
+    if (chat[i].acciones.some(x => x.accion === 'agregar_gasto')) nota.noGasto = true;
+    else setTimeout(() => ofrecerGasto(nota), 300);
+  }
+  else if (a.accion === 'agregar_gasto') {
+    datos.gastos.unshift({ id: id(), fecha: Date.now(), tipo: TIPOS_GASTO.includes(a.tipo) ? a.tipo : 'Otros', descripcion: str(a.detalle), monto: a.monto ? str(a.monto) : '', lista: str(a.lista), pagado: !!a.pagado });
+    hecho = 'Agregado a Gastos casa';
+  } else if (a.accion === 'marcar_gasto_pagado') {
+    const k = s => String(s || '').toLowerCase();
+    const g = datos.gastos.find(x => !x.pagado && (!a.tipo || x.tipo === a.tipo) && (!a.detalle || k(x.descripcion).includes(k(a.detalle)) || k(a.detalle).includes(k(x.descripcion))));
+    if (!g) { avisar('No encontré ese gasto pendiente.'); return; }
+    g.pagado = true; hecho = `${g.tipo}${g.descripcion ? ' · ' + g.descripcion : ''} marcado como pagado`;
+  }
   else if (a.accion === 'agregar_local') {
     datos.locales.unshift({ id: id(), nombre: str(a.nombre), vende: str(a.vende), direccion: str(a.direccion), telefono: str(a.telefono), nota: str(a.nota) }); hecho = 'Local anotado';
   } else if (a.accion === 'agregar_producto') {
@@ -551,7 +689,8 @@ function descartar(i, j) { chat[i].acciones.splice(j, 1); guardarChat(); dibujar
 
 /* ---------- Comunes ---------- */
 // Cartelitos propios: los alert/confirm del navegador muestran la dirección del sitio arriba.
-function cartel(texto, { si = 'Aceptar', no = '', peligro = false, campo = null } = {}) {
+function cartel(texto, { si = 'Aceptar', no = '', peligro = false, campo = null, frida = false } = {}) {
+  document.getElementById('avisoFrida').hidden = !frida;
   const d = document.getElementById('aviso'), c = document.getElementById('avisoCampo'), bSi = document.getElementById('avisoSi'), bNo = document.getElementById('avisoNo');
   document.getElementById('avisoTexto').textContent = texto;
   bSi.textContent = si; bSi.classList.toggle('peligro', peligro);
@@ -584,6 +723,7 @@ async function borrar(lista, x) {
   if (!await preguntar('¿Seguro que lo querés borrar?', 'Borrar', true)) return;
   datos[lista] = datos[lista].filter(i => i.id !== x);
   if (lista === 'locales') datos.productos.forEach(p => { if (p.local === x) p.local = ''; });
+  if (lista === 'gastos') datos.notas.forEach(n => { if (n.gasto === x) delete n.gasto; });
   guardar(); dibujar();
 }
 
@@ -603,7 +743,7 @@ document.getElementById('archivo').onchange = async e => {
   try {
     const d = JSON.parse(await file.text());
     if (!await preguntar('Esto reemplaza lo que tenés ahora por la copia. ¿Seguir?', 'Seguir')) return;
-    datos = { notas: d.notas || [], productos: d.productos || [], locales: d.locales || [] };
+    datos = { notas: d.notas || [], productos: d.productos || [], locales: d.locales || [], gastos: d.gastos || [] };
     guardar(); dibujar();
   } catch { avisar('Ese archivo no es una copia válida.'); }
 };

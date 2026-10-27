@@ -53,8 +53,16 @@ Buscador: tenés la herramienta buscar_en_internet, que busca en internet de ver
 - NUNCA inventes precios, locales, direcciones ni teléfonos: si la búsqueda no los trae, decíselo y sugerile qué preguntar.
 - No pegues las URLs en tu respuesta: la app ya le muestra los links de las fuentes debajo.
 
+Gastos de la casa (aparte del negocio): en la app tiene "Gastos casa", que suma sola lo que gasta en el mes. Los tipos son: Supermercado, Verdulería, Carnicería, Almacén, Servicios (luz, gas, internet), Tarjeta de crédito, Farmacia y Otros.
+- Si te dicta o te pasa una lista del súper, de la verdulería, una compra para la casa, una factura de luz/gas/internet o el resumen de la tarjeta, preguntale: "¿Esto es una compra? ¿La agrego a Gastos casa?". Si no está claro, preguntá también de qué tipo es, cuánto fue (si no lo dijo) y si ya lo pagó. Hacé de a una o dos preguntas cortas, no todas juntas.
+- Cuando te conteste, proponé agregar_gasto con lo que sepas (si no sabe el monto, igual se puede agregar y completarlo después).
+- Si dice que pagó algo que figura como "falta pagar", proponé marcar_gasto_pagado.
+- Si pregunta cuánto gastó, sumalo vos con la lista de GASTOS CASA (del mes que pregunte) y mostrale la suma por tipo.
+- No mezcles: la mercadería para revender va en productos, no en Gastos casa.
+
 Acciones: podés proponer anotar cosas con las herramientas (nota, producto, local, marcar como comprado). Ella confirma con un botón, así que no digas que ya lo anotaste: decí que le dejaste el botón para guardarlo. Proponé una acción solo si ella lo pide o si está claro que le sirve (por ejemplo, te dicta un precio o un local). Los números van sin signo $ ni puntos de miles (ej. 12000).`;
 
+const TIPOS_GASTO = ["Supermercado", "Verdulería", "Carnicería", "Almacén", "Servicios (luz, gas, internet)", "Tarjeta de crédito", "Farmacia", "Otros"];
 const fn = (name: string, description: string, properties: Record<string, unknown>, required: string[]) =>
   ({ type: "function", function: { name, description, parameters: { type: "object", properties, required } } });
 const HERRAMIENTAS = [
@@ -71,6 +79,14 @@ const HERRAMIENTAS = [
     nombre: { type: "string" }, vende: { type: "string" }, direccion: { type: "string" }, telefono: { type: "string" }, nota: { type: "string" },
   }, ["nombre"]),
   fn("marcar_comprado", "Propone marcar un producto suyo como ya comprado.", { nombre: { type: "string", description: "Nombre del producto tal como está anotado" } }, ["nombre"]),
+  fn("agregar_gasto", "Propone agregar un gasto de la casa (no del negocio) a 'Gastos casa'.", {
+    tipo: { type: "string", enum: TIPOS_GASTO }, detalle: { type: "string", description: "Opcional: comercio, tarjeta o servicio (ej. Coto, Visa, luz)" },
+    monto: { type: "number", description: "Total en pesos, si lo sabe" }, pagado: { type: "boolean", description: "true si ya lo pagó" },
+    lista: { type: "string", description: "La lista de cosas, si es una compra" },
+  }, ["tipo"]),
+  fn("marcar_gasto_pagado", "Propone marcar como pagado un gasto de la casa que figura como 'falta pagar'.", {
+    tipo: { type: "string", enum: TIPOS_GASTO }, detalle: { type: "string" },
+  }, ["tipo"]),
 ];
 
 // Búsqueda web real con el buscador que Groq incorpora en gpt-oss (browser_search: busca y lee páginas). No se puede
